@@ -1,5 +1,5 @@
 import { randomUUID } from "crypto";
-import { z } from "zod";
+import { z } from "zod/v4";
 
 import { type Model } from "../../db";
 import { env } from "../../env";
@@ -21,7 +21,11 @@ import { logger } from "../logger";
 import { QueueJobs } from "../queues";
 import { IngestionQueue } from "../redis/ingestionQueue";
 import { redis } from "../redis/redis";
-import { eventTypes, ingestionEvent, IngestionEventType } from "./types";
+import {
+  eventTypes,
+  createIngestionEventSchema,
+  IngestionEventType,
+} from "./types";
 import {
   StorageService,
   StorageServiceFactory,
@@ -45,6 +49,7 @@ const getS3StorageServiceClient = (bucketName: string): StorageService => {
   return s3StorageServiceClient;
 };
 
+// eslint-disable-next-line no-unused-vars
 export type TokenCountDelegate = (p: {
   model: Model;
   text: unknown;
@@ -75,17 +80,27 @@ const getDelay = (delay: number | null) => {
 };
 
 /**
+ * Options for event batch processing.
+ * @property delay - Delay in ms to wait before processing events in the batch.
+ * @property source - Source of the events for metrics tracking (e.g., "otel", "api").
+ * @property isLangfuseInternal - Whether the events are being ingested by Langfuse internally (e.g. traces created for prompt experiments).
+ */
+type ProcessEventBatchOptions = {
+  delay?: number | null;
+  source?: "api" | "otel";
+  isLangfuseInternal?: boolean;
+};
+
+/**
  * Processes a batch of events.
  * @param input - Batch of IngestionEventType. Will validate the types first thing and return errors if they are invalid.
  * @param authCheck - AuthHeaderValidVerificationResult
- * @param delay - (Optional) Delay in ms to wait before processing events in the batch.
- * @param source - (Optional) Source of the events for metrics tracking (e.g., "otel", "api").
+ * @param options - (Optional) Options for the event batch processing.
  */
 export const processEventBatch = async (
   input: unknown[],
   authCheck: AuthHeaderValidVerificationResult,
-  delay: number | null = null,
-  source: "api" | "otel" = "api",
+  options: ProcessEventBatchOptions = {},
 ): Promise<{
   successes: { id: string; status: number }[];
   errors: {
@@ -95,6 +110,8 @@ export const processEventBatch = async (
     error?: string;
   }[];
 }> => {
+  const { delay = null, source = "api", isLangfuseInternal = false } = options;
+
   // add context of api call to the span
   const currentSpan = getCurrentSpan();
   recordIncrement("langfuse.ingestion.event", input.length, { source });
@@ -120,9 +137,10 @@ export const processEventBatch = async (
   const validationErrors: { id: string; error: unknown }[] = [];
   const authenticationErrors: { id: string; error: unknown }[] = [];
 
-  const batch: z.infer<typeof ingestionEvent>[] = input
+  const ingestionSchema = createIngestionEventSchema(isLangfuseInternal);
+  const batch: z.infer<typeof ingestionSchema>[] = input
     .flatMap((event) => {
-      const parsed = ingestionEvent.safeParse(event);
+      const parsed = ingestionSchema.safeParse(event);
       if (!parsed.success) {
         validationErrors.push({
           id:
@@ -229,10 +247,22 @@ export const processEventBatch = async (
     throw new Error("Redis not initialized, aborting event processing");
   }
 
-  const queue = IngestionQueue.getInstance();
+  const projectIdsToSkipS3List =
+    env.LANGFUSE_SKIP_S3_LIST_FOR_OBSERVATIONS_PROJECT_IDS?.split(",") ?? [];
+
   await Promise.all(
-    Object.keys(sortedBatchByEventBodyId).map(async (id) =>
-      queue
+    Object.keys(sortedBatchByEventBodyId).map(async (id) => {
+      const eventData = sortedBatchByEventBodyId[id];
+      const shardingKey = `${authCheck.scope.projectId}-${eventData.eventBodyId}`;
+      const queue = IngestionQueue.getInstance({ shardingKey });
+
+      const shouldSkipS3List =
+        getClickhouseEntityType(eventData.type) === "observation" &&
+        authCheck.scope.projectId !== null &&
+        (projectIdsToSkipS3List.includes(authCheck.scope.projectId) ||
+          source === "otel");
+
+      return queue
         ? queue.add(
             QueueJobs.IngestionJob,
             {
@@ -241,14 +271,10 @@ export const processEventBatch = async (
               name: QueueJobs.IngestionJob as const,
               payload: {
                 data: {
-                  type: sortedBatchByEventBodyId[id].type,
-                  eventBodyId: sortedBatchByEventBodyId[id].eventBodyId,
-                  fileKey: sortedBatchByEventBodyId[id].key,
-                  skipS3List:
-                    source === "otel" &&
-                    getClickhouseEntityType(
-                      sortedBatchByEventBodyId[id].type,
-                    ) === "observation",
+                  type: eventData.type,
+                  eventBodyId: eventData.eventBodyId,
+                  fileKey: eventData.key,
+                  skipS3List: shouldSkipS3List,
                 },
                 authCheck: authCheck as {
                   validKey: true;
@@ -261,8 +287,8 @@ export const processEventBatch = async (
             },
             { delay: getDelay(delay) },
           )
-        : Promise.reject("Failed to instantiate queue"),
-    ),
+        : Promise.reject("Failed to instantiate queue");
+    }),
   );
 
   return aggregateBatchResult(
@@ -293,7 +319,7 @@ const isAuthorized = (
 /**
  * Sorts a batch of ingestion events. Orders by: updating events last, sorted by timestamp asc.
  */
-const sortBatch = (batch: Array<z.infer<typeof ingestionEvent>>) => {
+const sortBatch = (batch: IngestionEventType[]) => {
   const updateEvents: (typeof eventTypes)[keyof typeof eventTypes][] = [
     eventTypes.GENERATION_UPDATE,
     eventTypes.SPAN_UPDATE,

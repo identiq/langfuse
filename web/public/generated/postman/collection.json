@@ -649,7 +649,7 @@
           "request": {
             "description": "List dataset run items",
             "url": {
-              "raw": "{{baseUrl}}/api/public/dataset-run-items?datasetId=&runName=&page=&limit=&response=",
+              "raw": "{{baseUrl}}/api/public/dataset-run-items?datasetId=&runName=&page=&limit=",
               "host": [
                 "{{baseUrl}}"
               ],
@@ -678,11 +678,6 @@
                   "key": "limit",
                   "value": "",
                   "description": "limit of items per page"
-                },
-                {
-                  "key": "response",
-                  "value": "",
-                  "description": null
                 }
               ],
               "variable": []
@@ -2151,7 +2146,7 @@
             "auth": null,
             "body": {
               "mode": "raw",
-              "raw": "{\n    \"type\": \"chat\",\n    \"name\": \"example\",\n    \"prompt\": [\n        {\n            \"role\": \"example\",\n            \"content\": \"example\"\n        }\n    ],\n    \"config\": \"UNKNOWN\",\n    \"labels\": [\n        \"example\"\n    ],\n    \"tags\": [\n        \"example\"\n    ],\n    \"commitMessage\": \"example\"\n}",
+              "raw": "{\n    \"type\": \"chat\",\n    \"name\": \"example\",\n    \"prompt\": [\n        {\n            \"type\": \"chatmessage\",\n            \"role\": \"example\",\n            \"content\": \"example\"\n        }\n    ],\n    \"config\": \"UNKNOWN\",\n    \"labels\": [\n        \"example\"\n    ],\n    \"tags\": [\n        \"example\"\n    ],\n    \"commitMessage\": \"example\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2877,7 +2872,7 @@
           "request": {
             "description": "Get list of traces",
             "url": {
-              "raw": "{{baseUrl}}/api/public/traces?page=&limit=&userId=&name=&sessionId=&fromTimestamp=&toTimestamp=&orderBy=&tags=&version=&release=&environment=",
+              "raw": "{{baseUrl}}/api/public/traces?page=&limit=&userId=&name=&sessionId=&fromTimestamp=&toTimestamp=&orderBy=&tags=&version=&release=&environment=&fields=",
               "host": [
                 "{{baseUrl}}"
               ],
@@ -2946,6 +2941,11 @@
                   "key": "environment",
                   "value": "",
                   "description": "Optional filter for traces where the environment is one of the provided values."
+                },
+                {
+                  "key": "fields",
+                  "value": "",
+                  "description": "Comma-separated list of fields to include in the response. Available field groups are 'core' (always included), 'io' (input, output, metadata), 'scores', 'observations', 'metrics'. If not provided, all fields are included. Example: 'core,scores,metrics'"
                 }
               ],
               "variable": []

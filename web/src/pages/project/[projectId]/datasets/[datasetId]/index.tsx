@@ -12,11 +12,12 @@ import {
 import { DeleteDatasetButton } from "@/src/components/deleteButton";
 import { DuplicateDatasetButton } from "@/src/features/datasets/components/DuplicateDatasetButton";
 import { useState, useCallback } from "react";
-import { Bot, ChartLine, Cog, FlaskConical, MoreVertical } from "lucide-react";
+import { Bot, FlaskConical, MoreVertical } from "lucide-react";
 import { useHasProjectAccess } from "@/src/features/rbac/utils/checkProjectAccess";
 import {
   Dialog,
   DialogContent,
+  DialogHeader,
   DialogTitle,
   DialogTrigger,
 } from "@/src/components/ui/dialog";
@@ -26,23 +27,17 @@ import { showSuccessToast } from "@/src/features/notifications/showSuccessToast"
 import { DropdownMenuItem } from "@/src/components/ui/dropdown-menu";
 import { DatasetAnalytics } from "@/src/features/datasets/components/DatasetAnalytics";
 import { RESOURCE_METRICS } from "@/src/features/dashboard/lib/score-analytics-utils";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/src/components/ui/popover";
 import { usePostHogClientCapture } from "@/src/features/posthog-analytics/usePostHogClientCapture";
 import Page from "@/src/components/layouts/page";
 import {
-  TabsBarList,
-  TabsBarTrigger,
-  TabsBar,
-} from "@/src/components/ui/tabs-bar";
-import { Separator } from "@/src/components/ui/separator";
+  getDatasetTabs,
+  DATASET_TABS,
+} from "@/src/features/navigation/utils/dataset-tabs";
 import { TemplateSelector } from "@/src/features/evals/components/template-selector";
 import { useEvaluatorDefaults } from "@/src/features/experiments/hooks/useEvaluatorDefaults";
 import { useExperimentEvaluatorData } from "@/src/features/experiments/hooks/useExperimentEvaluatorData";
 import { EvaluatorForm } from "@/src/features/evals/components/evaluator-form";
+import useLocalStorage from "@/src/components/useLocalStorage";
 
 export default function Dataset() {
   const router = useRouter();
@@ -52,9 +47,11 @@ export default function Dataset() {
   const utils = api.useUtils();
   const [isCreateExperimentDialogOpen, setIsCreateExperimentDialogOpen] =
     useState(false);
-  const [selectedMetrics, setSelectedMetrics] = useState<string[]>(
+  const [selectedMetrics, setSelectedMetrics] = useLocalStorage<string[]>(
+    `${projectId}-dataset-chart-metrics`,
     RESOURCE_METRICS.map((metric) => metric.key),
   );
+
   const [scoreOptions, setScoreOptions] = useState<
     {
       key: string;
@@ -165,20 +162,10 @@ export default function Dataset() {
               description: dataset.data.description,
             }
           : undefined,
-        tabsComponent: (
-          <TabsBar value="runs">
-            <TabsBarList>
-              <TabsBarTrigger value="runs">Runs</TabsBarTrigger>
-              <TabsBarTrigger value="items" asChild>
-                <Link
-                  href={`/project/${projectId}/datasets/${datasetId}/items`}
-                >
-                  Items
-                </Link>
-              </TabsBarTrigger>
-            </TabsBarList>
-          </TabsBar>
-        ),
+        tabsProps: {
+          tabs: getDatasetTabs(projectId, datasetId),
+          activeTab: DATASET_TABS.RUNS,
+        },
         actionButtonsRight: (
           <>
             <Dialog
@@ -223,33 +210,13 @@ export default function Dataset() {
               </div>
             )}
 
-            <Popover>
-              <PopoverTrigger asChild>
-                <Button
-                  variant="outline"
-                  size="icon"
-                  className="focus-visible:ring-0 focus-visible:ring-offset-0"
-                >
-                  <div className="relative" title="Chart settings">
-                    <ChartLine className="h-4 w-4" />
-                    <Cog className="absolute -bottom-1.5 -right-1 h-3.5 w-3.5 rounded-full bg-background p-0.5" />
-                  </div>
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent align="end" className="w-[250px] p-0">
-                <div className="px-3 py-2 font-medium">Chart settings</div>
-                <Separator />
-                <div onClick={(e) => e.stopPropagation()} className="p-1">
-                  <DatasetAnalytics
-                    key="dataset-analytics"
-                    projectId={projectId}
-                    scoreOptions={scoreOptions}
-                    selectedMetrics={selectedMetrics}
-                    setSelectedMetrics={setSelectedMetrics}
-                  />
-                </div>
-              </PopoverContent>
-            </Popover>
+            <DatasetAnalytics
+              key="dataset-analytics"
+              projectId={projectId}
+              scoreOptions={scoreOptions}
+              selectedMetrics={selectedMetrics}
+              setSelectedMetrics={setSelectedMetrics}
+            />
 
             <DetailPageNav
               currentId={datasetId}
@@ -279,7 +246,13 @@ export default function Dataset() {
                     projectId={projectId}
                   />
                 </DropdownMenuItem>
-                <DropdownMenuItem asChild>
+                <DropdownMenuItem
+                  asChild
+                  onSelect={(event) => {
+                    event.preventDefault();
+                    return false;
+                  }}
+                >
                   <DeleteDatasetButton
                     itemId={datasetId}
                     projectId={projectId}
@@ -318,11 +291,14 @@ export default function Dataset() {
           }}
         >
           <DialogContent className="max-h-[90vh] max-w-screen-md overflow-y-auto">
-            <DialogTitle>
-              {selectedEvaluatorData.evaluator.id ? "Edit" : "Configure"}{" "}
-              Evaluator
-            </DialogTitle>
+            <DialogHeader>
+              <DialogTitle>
+                {selectedEvaluatorData.evaluator.id ? "Edit" : "Configure"}{" "}
+                Evaluator
+              </DialogTitle>
+            </DialogHeader>
             <EvaluatorForm
+              useDialog={true}
               projectId={projectId}
               evalTemplates={evalTemplates.data?.templates ?? []}
               templateId={selectedEvaluatorData.templateId}

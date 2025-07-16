@@ -1,5 +1,5 @@
 import { removeEmptyEnvVariables } from "@langfuse/shared";
-import { z } from "zod";
+import { z } from "zod/v4";
 
 const EnvSchema = z.object({
   BUILD_ID: z.string().optional(),
@@ -9,14 +9,13 @@ const EnvSchema = z.object({
   DATABASE_URL: z.string(),
   HOSTNAME: z.string().default("0.0.0.0"),
   PORT: z.coerce
-    .number({
-      description:
-        ".env files convert numbers to strings, therefore we have to enforce them to be numbers",
-    })
+    .number() // ".env files convert numbers to strings, therefore we have to enforce them to be numbers"
     .positive()
     .max(65536, `options.port should be >= 0 and < 65536`)
     .default(3030),
 
+  LANGFUSE_CACHE_AUTOMATIONS_ENABLED: z.enum(["true", "false"]).default("true"),
+  LANGFUSE_CACHE_AUTOMATIONS_TTL_SECONDS: z.coerce.number().default(60),
   LANGFUSE_S3_BATCH_EXPORT_ENABLED: z.enum(["true", "false"]).default("false"),
   LANGFUSE_S3_BATCH_EXPORT_BUCKET: z.string().optional(),
   LANGFUSE_S3_BATCH_EXPORT_PREFIX: z.string().default(""),
@@ -32,7 +31,7 @@ const EnvSchema = z.object({
   LANGFUSE_S3_BATCH_EXPORT_SSE_KMS_KEY_ID: z.string().optional(),
 
   LANGFUSE_S3_EVENT_UPLOAD_BUCKET: z.string({
-    required_error: "Langfuse requires a bucket name for S3 Event Uploads.",
+    error: "Langfuse requires a bucket name for S3 Event Uploads.",
   }),
   LANGFUSE_S3_EVENT_UPLOAD_PREFIX: z.string().default(""),
   LANGFUSE_S3_EVENT_UPLOAD_REGION: z.string().optional(),
@@ -79,19 +78,6 @@ const EnvSchema = z.object({
     .number()
     .positive()
     .default(3),
-  REDIS_HOST: z.string().nullish(),
-  REDIS_PORT: z.coerce
-    .number({
-      description:
-        ".env files convert numbers to strings, therefore we have to enforce them to be numbers",
-    })
-    .positive()
-    .max(65536, `options.port should be >= 0 and < 65536`)
-    .default(6379)
-    .nullable(),
-  REDIS_AUTH: z.string().nullish(),
-  REDIS_CONNECTION_STRING: z.string().nullish(),
-  REDIS_ENABLE_AUTO_PIPELINING: z.enum(["true", "false"]).default("true"),
 
   CLICKHOUSE_URL: z.string().url(),
   CLICKHOUSE_USER: z.string(),
@@ -197,6 +183,12 @@ const EnvSchema = z.object({
   QUEUE_CONSUMER_DEAD_LETTER_RETRY_QUEUE_IS_ENABLED: z
     .enum(["true", "false"])
     .default("false"),
+  QUEUE_CONSUMER_WEBHOOK_QUEUE_IS_ENABLED: z
+    .enum(["true", "false"])
+    .default("true"),
+  QUEUE_CONSUMER_ENTITY_CHANGE_QUEUE_IS_ENABLED: z
+    .enum(["true", "false"])
+    .default("true"),
 
   // Core data S3 upload - Langfuse Cloud
   LANGFUSE_S3_CORE_DATA_EXPORT_IS_ENABLED: z
@@ -232,11 +224,6 @@ const EnvSchema = z.object({
     .enum(["true", "false"])
     .default("false"),
 
-  // Whether to collect queue length metrics. Experimental flag to understand redis performance around this command.
-  LANGFUSE_COLLECT_QUEUE_LENGTH_METRICS: z
-    .enum(["true", "false"])
-    .default("true"),
-
   LANGFUSE_S3_CONCURRENT_READS: z.coerce.number().positive().default(50),
   LANGFUSE_CLICKHOUSE_PROJECT_DELETION_CONCURRENCY_DURATION_MS: z.coerce
     .number()
@@ -246,9 +233,22 @@ const EnvSchema = z.object({
     .number()
     .positive()
     .default(120_000), // 2 minutes
+
+  LANGFUSE_EXPERIMENT_INSERT_INTO_AGGREGATING_MERGE_TREES: z
+    .enum(["true", "false"])
+    .default("false"),
+
+  LANGFUSE_WEBHOOK_QUEUE_PROCESSING_CONCURRENCY: z.coerce
+    .number()
+    .positive()
+    .default(5),
+  LANGFUSE_ENTITY_CHANGE_QUEUE_PROCESSING_CONCURRENCY: z.coerce
+    .number()
+    .positive()
+    .default(2),
 });
 
 export const env: z.infer<typeof EnvSchema> =
-  process.env.DOCKER_BUILD === "1"
+  process.env.DOCKER_BUILD === "1" // eslint-disable-line turbo/no-undeclared-env-vars
     ? (process.env as any)
     : EnvSchema.parse(removeEmptyEnvVariables(process.env));

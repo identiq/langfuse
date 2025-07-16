@@ -10,7 +10,6 @@ import React, {
 import { v4 as uuidv4 } from "uuid";
 
 import { createEmptyMessage } from "@/src/components/ChatMessages/utils/createEmptyMessage";
-import useCommandEnter from "@/src/features/playground/page/hooks/useCommandEnter";
 import { useModelParams } from "@/src/features/playground/page/hooks/useModelParams";
 import usePlaygroundCache from "@/src/features/playground/page/hooks/usePlaygroundCache";
 import { usePostHogClientCapture } from "@/src/features/posthog-analytics/usePostHogClientCapture";
@@ -19,13 +18,16 @@ import {
   ChatMessageRole,
   extractVariables,
   type ChatMessageWithId,
+  type ChatMessageWithIdNoPlaceholders,
   type PromptVariable,
   ToolCallResponseSchema,
   type UIModelParams,
   type ToolCallResponse,
-  type LLMToolDefinition,
   type LLMToolCall,
   ChatMessageType,
+  type ChatMessage,
+  compileChatMessagesWithIds,
+  type MessagePlaceholderValues,
 } from "@langfuse/shared";
 
 import type { MessagesContext } from "@/src/components/ChatMessages/types";
@@ -34,6 +36,7 @@ import { env } from "@/src/env.mjs";
 import {
   type PlaygroundSchema,
   type PlaygroundTool,
+  type PlaceholderMessageFillIn,
 } from "@/src/features/playground/page/types";
 import { getFinalModelParams } from "@/src/utils/getFinalModelParams";
 
@@ -41,6 +44,10 @@ type PlaygroundContextType = {
   promptVariables: PromptVariable[];
   updatePromptVariableValue: (variable: string, value: string) => void;
   deletePromptVariable: (variable: string) => void;
+
+  messagePlaceholders: PlaceholderMessageFillIn[];
+  updateMessagePlaceholderValue: (name: string, value: ChatMessage[]) => void;
+  deleteMessagePlaceholder: (name: string) => void;
 
   tools: PlaygroundTool[];
   setTools: React.Dispatch<React.SetStateAction<PlaygroundTool[]>>;
@@ -52,7 +59,7 @@ type PlaygroundContextType = {
   outputJson: string;
   outputToolCalls: LLMToolCall[];
 
-  handleSubmit: () => Promise<void>;
+  handleSubmit: (streaming?: boolean) => Promise<void>;
   isStreaming: boolean;
 } & ModelParamsContext &
   MessagesContext;
@@ -78,6 +85,9 @@ export const PlaygroundProvider: React.FC<PropsWithChildren> = ({
   const projectId = useProjectIdFromURL();
   const { playgroundCache, setPlaygroundCache } = usePlaygroundCache();
   const [promptVariables, setPromptVariables] = useState<PromptVariable[]>([]);
+  const [messagePlaceholders, setMessagePlaceholders] = useState<
+    PlaceholderMessageFillIn[]
+  >([]);
   const [output, setOutput] = useState("");
   const [outputToolCalls, setOutputToolCalls] = useState<LLMToolCall[]>([]);
   const [outputJson, setOutputJson] = useState("");
@@ -127,7 +137,12 @@ export const PlaygroundProvider: React.FC<PropsWithChildren> = ({
       structuredOutputSchema: cachedStructuredOutputSchema,
     } = playgroundCache;
 
-    setMessages(cachedMessages.map((m) => ({ ...m, id: uuidv4() })));
+    setMessages(
+      cachedMessages.map((m) => ({
+        ...m,
+        id: "id" in m && typeof m.id === "string" ? m.id : uuidv4(),
+      })),
+    );
 
     if (cachedOutput) {
       // Try parsing a previous output with tool calls
@@ -161,7 +176,9 @@ export const PlaygroundProvider: React.FC<PropsWithChildren> = ({
   }, [playgroundCache, setModelParams]);
 
   const updatePromptVariables = useCallback(() => {
-    const messageContents = messages.map((m) => m.content).join("\n");
+    const messageContents = messages
+      .map((m) => ("content" in m ? m.content : m.name))
+      .join("\n");
     const variables = extractVariables(messageContents)
       .map((v) => v.trim())
       .filter(Boolean);
@@ -220,6 +237,13 @@ export const PlaygroundProvider: React.FC<PropsWithChildren> = ({
         ]);
 
         return toolCallMessage;
+      } else if (message.type === ChatMessageType.Placeholder) {
+        const placeholderMessage = {
+          ...message,
+          id: uuidv4(),
+        } as ChatMessageWithId;
+        setMessages((prev) => [...prev, placeholderMessage]);
+        return placeholderMessage;
       } else {
         const newMessage = createEmptyMessage(message);
         setMessages((prev) => [...prev, newMessage]);
@@ -257,17 +281,23 @@ export const PlaygroundProvider: React.FC<PropsWithChildren> = ({
     [],
   );
 
-  const handleSubmit: PlaygroundContextType["handleSubmit"] =
-    useCallback(async () => {
+  const handleSubmit: PlaygroundContextType["handleSubmit"] = useCallback(
+    async (streaming = true) => {
       try {
         setIsStreaming(true);
         setOutput("");
         setOutputJson("");
         setOutputToolCalls([]);
 
-        const finalMessages = getFinalMessages(promptVariables, messages);
+        const finalMessages = getFinalMessages(
+          promptVariables,
+          messages,
+          messagePlaceholders,
+        );
         const leftOverVariables = extractVariables(
-          finalMessages.map((m) => m.content).join("\n"),
+          finalMessages
+            .map((m) => (typeof m.content === "string" ? m.content : ""))
+            .join("\n"),
         );
 
         if (!modelParams.provider.value || !modelParams.model.value) {
@@ -291,6 +321,7 @@ export const PlaygroundProvider: React.FC<PropsWithChildren> = ({
             finalMessages,
             modelParams,
             tools,
+            streaming,
           );
 
           const displayContent =
@@ -310,18 +341,28 @@ export const PlaygroundProvider: React.FC<PropsWithChildren> = ({
             finalMessages,
             modelParams,
             structuredOutputSchema,
+            streaming,
           );
 
           setOutput(response);
         } else {
-          const completionStream = getChatCompletionStream(
-            projectId,
-            finalMessages,
-            modelParams,
-          );
+          if (streaming) {
+            const completionStream = getChatCompletionStream(
+              projectId,
+              finalMessages,
+              modelParams,
+            );
 
-          for await (const token of completionStream) {
-            response += token;
+            for await (const token of completionStream) {
+              response += token;
+              setOutput(response);
+            }
+          } else {
+            response = await getChatCompletionNonStreaming(
+              projectId,
+              finalMessages,
+              modelParams,
+            );
             setOutput(response);
           }
         }
@@ -352,25 +393,26 @@ export const PlaygroundProvider: React.FC<PropsWithChildren> = ({
           isStructuredOutput: Boolean(structuredOutputSchema),
         });
       } catch (err) {
-        console.error(err);
-
         alert(err instanceof Error ? err.message : "An error occurred");
         // TODO: add error handling via toast
       } finally {
         setIsStreaming(false);
       }
-    }, [
+    },
+    [
       messages,
       modelParams,
       promptVariables,
+      messagePlaceholders,
       tools,
       capture,
       setPlaygroundCache,
       structuredOutputSchema,
       projectId,
-    ]);
+    ],
+  );
 
-  useCommandEnter(!isStreaming, handleSubmit);
+  // Command enter handling moved to Messages component to access streaming preference
 
   const updatePromptVariableValue = useCallback(
     (variable: string, value: string) => {
@@ -385,12 +427,68 @@ export const PlaygroundProvider: React.FC<PropsWithChildren> = ({
     setPromptVariables((prev) => prev.filter((v) => v.name !== variable));
   }, []);
 
+  const updateMessagePlaceholderValue = useCallback(
+    (name: string, value: ChatMessage[]) => {
+      setMessagePlaceholders((prev) =>
+        prev.map((p) => (p.name === name ? { ...p, value } : p)),
+      );
+    },
+    [],
+  );
+
+  const deleteMessagePlaceholder = useCallback((name: string) => {
+    setMessagePlaceholders((prev) => prev.filter((p) => p.name !== name));
+  }, []);
+
+  const updateMessagePlaceholders = useCallback(() => {
+    const placeholderNames = messages
+      .filter(
+        (
+          msg,
+        ): msg is ChatMessageWithId & {
+          type: ChatMessageType.Placeholder;
+          name: string;
+        } => msg.type === ChatMessageType.Placeholder,
+      )
+      .map((msg) => msg.name);
+
+    setMessagePlaceholders((prev) => {
+      // Set isUsed flag for existing placeholders and remove unused ones
+      const next = prev.reduce<PlaceholderMessageFillIn[]>(
+        (updatedPlaceholders, p) => {
+          const isUsed = placeholderNames.includes(p.name);
+          // Remove unused placeholders
+          if (!isUsed && p.value.length === 0) {
+            return updatedPlaceholders;
+          }
+          updatedPlaceholders.push({ ...p, isUsed });
+          return updatedPlaceholders;
+        },
+        [],
+      );
+
+      // Add new placeholders
+      for (const name of placeholderNames) {
+        if (!next.some((p) => p.name === name)) {
+          next.push({ name, value: [], isUsed: true });
+        }
+      }
+
+      return next;
+    });
+  }, [messages]);
+
+  useEffect(updateMessagePlaceholders, [messages, updateMessagePlaceholders]);
+
   return (
     <PlaygroundContext.Provider
       value={{
         promptVariables,
         updatePromptVariableValue,
         deletePromptVariable,
+        messagePlaceholders,
+        updateMessagePlaceholderValue,
+        deleteMessagePlaceholder,
 
         tools,
         setTools,
@@ -427,9 +525,10 @@ export const PlaygroundProvider: React.FC<PropsWithChildren> = ({
 
 async function getChatCompletionWithTools(
   projectId: string | undefined,
-  messages: ChatMessageWithId[],
+  messages: ChatMessageWithIdNoPlaceholders[],
   modelParams: UIModelParams,
   tools: unknown[],
+  streaming: boolean = false,
 ): Promise<ToolCallResponse> {
   if (!projectId) throw Error("Project ID is not set");
 
@@ -438,6 +537,7 @@ async function getChatCompletionWithTools(
     messages,
     modelParams: getFinalModelParams(modelParams),
     tools,
+    streaming,
   });
   const result = await fetch(
     `${env.NEXT_PUBLIC_BASE_PATH ?? ""}/api/chatCompletion`,
@@ -469,6 +569,7 @@ async function getChatCompletionWithStructuredOutput(
   messages: ChatMessageWithId[],
   modelParams: UIModelParams,
   structuredOutputSchema: PlaygroundSchema | null,
+  streaming: boolean = false,
 ): Promise<string> {
   if (!projectId) throw Error("Project ID is not set");
 
@@ -477,6 +578,7 @@ async function getChatCompletionWithStructuredOutput(
     messages,
     modelParams: getFinalModelParams(modelParams),
     structuredOutputSchema: structuredOutputSchema?.schema,
+    streaming,
   });
 
   const result = await fetch(
@@ -517,6 +619,7 @@ async function* getChatCompletionStream(
     projectId,
     messages,
     modelParams: getFinalModelParams(modelParams),
+    streaming: true,
   });
   const result = await fetch(
     `${env.NEXT_PUBLIC_BASE_PATH ?? ""}/api/chatCompletion`,
@@ -555,10 +658,45 @@ async function* getChatCompletionStream(
   }
 }
 
+async function getChatCompletionNonStreaming(
+  projectId: string | undefined,
+  messages: ChatMessageWithId[],
+  modelParams: UIModelParams,
+): Promise<string> {
+  if (!projectId) {
+    throw new Error("Project ID is not set");
+  }
+
+  const body = JSON.stringify({
+    projectId,
+    messages,
+    modelParams: getFinalModelParams(modelParams),
+    streaming: false,
+  });
+
+  const result = await fetch(
+    `${env.NEXT_PUBLIC_BASE_PATH ?? ""}/api/chatCompletion`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body,
+    },
+  );
+
+  if (!result.ok) {
+    const errorData = await result.json();
+    throw new Error(`Completion failed: ${errorData.message}`);
+  }
+
+  const responseData = await result.json();
+  return responseData.content || "";
+}
+
 function getFinalMessages(
   promptVariables: PromptVariable[],
   messages: ChatMessageWithId[],
-) {
+  messagePlaceholders: PlaceholderMessageFillIn[],
+): ChatMessageWithIdNoPlaceholders[] {
   const missingVariables = promptVariables.filter((v) => !v.value && v.isUsed);
   if (missingVariables.length > 0) {
     throw new Error(
@@ -568,31 +706,60 @@ function getFinalMessages(
     );
   }
 
-  // Dynamically replace variables in the prompt
-  const finalMessages = messages
-    .filter(
-      (m) =>
-        m.content.length > 0 || ("toolCalls" in m && m.toolCalls.length > 0),
-    )
-    .map((m) => {
-      let content = m.content;
-      for (const variable of promptVariables) {
-        content = content.replace(
-          new RegExp(`{{\\s*${variable.name}\\s*}}`, "g"),
-          variable.value,
-        );
-      }
+  const missingPlaceholders = messagePlaceholders.filter(
+    (p) => p.value.length === 0 && p.isUsed,
+  );
+  if (missingPlaceholders.length > 0) {
+    throw new Error(
+      `Please set values for the following message placeholders: ${missingPlaceholders
+        .map((p) => p.name)
+        .join(", ")}`,
+    );
+  }
 
-      return { ...m, content };
-    });
-  return finalMessages;
+  const placeholderValues: MessagePlaceholderValues =
+    messagePlaceholders.reduce((placeholderMap, p) => {
+      placeholderMap[p.name] = p.value;
+      return placeholderMap;
+    }, {} as MessagePlaceholderValues);
+
+  const textVariables = promptVariables.reduce(
+    (variableMap, v) => {
+      variableMap[v.name] = v.value;
+      return variableMap;
+    },
+    {} as Record<string, string>,
+  );
+
+  const compiledMessages = compileChatMessagesWithIds(
+    messages,
+    placeholderValues,
+    textVariables,
+  );
+
+  // Filter empty messages (except tool calls), e.g. if placeholder value was empty
+  return compiledMessages.filter((m) => {
+    // Standard ChatMessage filtering
+    if (typeof m.content === "string") {
+      return (
+        m.content.length > 0 ||
+        ("toolCalls" in m &&
+          m.toolCalls &&
+          Array.isArray(m.toolCalls) &&
+          m.toolCalls.length > 0)
+      );
+    }
+
+    // For arbitrary objects, keep them (assume they have meaningful content)
+    return true;
+  });
 }
 
 function getOutputJson(
   output: string,
   messages: ChatMessageWithId[],
   modelParams: UIModelParams,
-  tools: LLMToolDefinition[],
+  tools: PlaygroundTool[],
   structuredOutputSchema: PlaygroundSchema | null,
 ) {
   return JSON.stringify(

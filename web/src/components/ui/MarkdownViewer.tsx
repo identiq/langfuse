@@ -11,7 +11,6 @@ import {
 import ReactMarkdown, { type Options } from "react-markdown";
 import Link from "next/link";
 import remarkGfm from "remark-gfm";
-import remarkMath from "remark-math";
 import { CodeBlock } from "@/src/components/ui/Codeblock";
 import { useTheme } from "next-themes";
 import { ImageOff, Info } from "lucide-react";
@@ -27,12 +26,14 @@ import {
   isOpenAITextContentPart,
   isOpenAIImageContentPart,
 } from "@/src/components/schemas/ChatMlSchema";
-import { type z } from "zod";
+import { type z } from "zod/v4";
 import { ResizableImage } from "@/src/components/ui/resizable-image";
 import { LangfuseMediaView } from "@/src/components/ui/LangfuseMediaView";
 import { type MediaReturnType } from "@/src/features/media/validation";
 import { JSONView } from "@/src/components/ui/CodeJsonViewer";
 import { MarkdownJsonViewHeader } from "@/src/components/ui/MarkdownJsonView";
+import { copyTextToClipboard } from "@/src/utils/clipboard";
+import DOMPurify from "dompurify";
 
 type ReactMarkdownNode = ReactMarkdownExtraProps["node"];
 type ReactMarkdownNodeChildren = Exclude<
@@ -48,6 +49,33 @@ const MemoizedReactMarkdown: FC<Options> = memo(
     prevProps.children === nextProps.children &&
     prevProps.className === nextProps.className,
 );
+
+const getSafeUrl = (href: string | undefined | null): string | null => {
+  if (!href || typeof href !== "string") return null;
+
+  // DOMPurify's default sanitization is quite permissive but safe
+  // It blocks javascript:, data: with scripts, vbscript:, etc.
+  // But allows http:, https:, ftp:, mailto:, tel:, and many others
+  try {
+    const sanitized = DOMPurify.sanitize(href, {
+      // ALLOWED_TAGS: An array of HTML tags that are explicitly permitted in the output.
+      // Setting this to an empty array means that no HTML tags are allowed.
+      // Any HTML tag found within the 'href' string would be stripped out.
+      ALLOWED_TAGS: [],
+
+      // ALLOWED_ATTR: An array of HTML attributes that are explicitly permitted on allowed tags.
+      // Setting this to an empty array means that no HTML attributes are allowed.
+      // Similar to ALLOWED_TAGS, this ensures that if any attributes are somehow
+      // embedded within the URL string (e.g., malformed or attempting injection),
+      // they will be removed by DOMPurify. We only expect a pure URL string.
+      ALLOWED_ATTR: [],
+    });
+
+    return sanitized || null;
+  } catch (error) {
+    return null;
+  }
+};
 
 const isTextElement = (child: ReactNode): child is ReactElement =>
   isValidElement(child) &&
@@ -98,7 +126,7 @@ function MarkdownRenderer({
           "space-y-2 overflow-x-auto break-words text-sm",
           className,
         )}
-        remarkPlugins={[remarkGfm, remarkMath]}
+        remarkPlugins={[remarkGfm]}
         components={{
           p({ children, node }) {
             if (isImageNode(node)) {
@@ -109,12 +137,24 @@ function MarkdownRenderer({
             );
           },
           a({ children, href }) {
-            if (href)
+            const safeHref = getSafeUrl(href);
+            if (safeHref) {
               return (
-                <Link href={href} className="underline" target="_blank">
+                <Link
+                  href={safeHref}
+                  className="underline"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
                   {children}
                 </Link>
               );
+            }
+            return (
+              <span className="text-muted-foreground underline">
+                {children}
+              </span>
+            );
           },
           ul({ children }) {
             if (isChecklist(children))
@@ -271,7 +311,7 @@ export function MarkdownView({
       typeof markdown === "string"
         ? markdown
         : parseOpenAIContentParts(markdown);
-    void navigator.clipboard.writeText(rawText);
+    void copyTextToClipboard(rawText);
   };
 
   const handleOnValueChange = () => {

@@ -1,18 +1,17 @@
 import { Terminal } from "lucide-react";
 import { useEffect, useState, useMemo } from "react";
 import { useRouter } from "next/router";
-import { z } from "zod";
+import { z } from "zod/v4";
 
 import { createEmptyMessage } from "@/src/components/ChatMessages/utils/createEmptyMessage";
 import { Button } from "@/src/components/ui/button";
 import usePlaygroundCache from "@/src/features/playground/page/hooks/usePlaygroundCache";
 import {
-  type PlaygroundTool,
   type PlaygroundCache,
   type PlaygroundSchema,
+  type PlaygroundTool,
 } from "@/src/features/playground/page/types";
 import { usePostHogClientCapture } from "@/src/features/posthog-analytics/usePostHogClientCapture";
-import { PromptType } from "@/src/features/prompts/server/utils/validation";
 import useProjectIdFromURL from "@/src/hooks/useProjectIdFromURL";
 import {
   ChatMessageRole,
@@ -28,7 +27,15 @@ import {
   type ChatMessage,
   OpenAIResponseFormatSchema,
   type Prisma,
+  PlaceholderMessageSchema,
+  type PlaceholderMessage,
+  isPlaceholder,
+  PromptType,
 } from "@langfuse/shared";
+import {
+  LANGGRAPH_NODE_TAG,
+  LANGGRAPH_STEP_TAG,
+} from "@/src/features/trace-graph-view/types";
 import { api } from "@/src/utils/api";
 import { cn } from "@/src/utils/tailwind";
 
@@ -119,7 +126,7 @@ export const JumpToPlaygroundButton: React.FC<JumpToPlaygroundButtonProps> = (
       title={
         isAvailable
           ? "Test in LLM playground"
-          : "Test in LLM playground is not available since messages are not in valid ChatML format or tool calls have been used. If you think this is not correct, please open a Github issue."
+          : "Test in LLM playground is not available since messages are not in valid ChatML format or tool calls have been used. If you think this is not correct, please open a GitHub issue."
       }
       onClick={handleClick}
       asChild
@@ -137,35 +144,86 @@ export const JumpToPlaygroundButton: React.FC<JumpToPlaygroundButtonProps> = (
   );
 };
 
+// Is LangGraph Trace? Decide from metadata. If so, we might need to recognise roles as tool names
+const isLangGraphTrace = (generation: { metadata: string | null }): boolean => {
+  if (!generation.metadata) return false;
+
+  try {
+    let metadata = generation.metadata;
+    if (typeof metadata === "string") {
+      metadata = JSON.parse(metadata);
+    }
+
+    if (typeof metadata === "object" && metadata !== null) {
+      return LANGGRAPH_NODE_TAG in metadata || LANGGRAPH_STEP_TAG in metadata;
+    }
+  } catch {
+    // Ignore JSON parsing errors
+  }
+
+  return false;
+};
+
+// Normalize LangGraph tool messages by converting tool-name roles to "tool"
+const normalizeLangGraphMessage = (
+  message: unknown,
+  isLangGraph: boolean = false,
+): unknown => {
+  if (!message || typeof message !== "object" || !("role" in message)) {
+    return message;
+  }
+
+  const validRoles = Object.values(ChatMessageRole);
+
+  if (isLangGraph && !validRoles.includes(message.role as ChatMessageRole)) {
+    // LangGraph sets role to tool name instead of "tool"
+    // Convert to proper tool message format
+    return {
+      ...message,
+      role: ChatMessageRole.Tool,
+      // TODO: remove?
+      // Preserve original role in case needed for debugging
+      _originalRole: message.role,
+    };
+  }
+
+  return message;
+};
+
 const ParsedChatMessageListSchema = z.array(
-  z.object({
-    role: z.nativeEnum(ChatMessageRole),
-    content: z.union([
-      z.string(),
-      z
-        .array(
-          z
-            .object({
-              text: z.string(),
-            })
-            .transform((v) => v.text),
-        )
-        .transform((v) => v.join("")),
-      z.union([z.null(), z.undefined()]).transform((_) => ""),
-      z.any().transform((v) => JSON.stringify(v, null, 2)),
-    ]),
-    tool_calls: z
-      .union([z.array(LLMToolCallSchema), z.array(OpenAIToolCallSchema)])
-      .optional(),
-    tool_call_id: z.string().optional(),
-    additional_kwargs: z
-      .object({
-        tool_calls: z
-          .union([z.array(LLMToolCallSchema), z.array(OpenAIToolCallSchema)])
-          .optional(),
-      })
-      .optional(),
-  }),
+  z.union([
+    // Regular chat message
+    z.object({
+      role: z.enum(ChatMessageRole),
+      content: z.union([
+        z.string(),
+        z
+          .array(
+            z
+              .object({
+                text: z.string(),
+              })
+              .transform((v) => v.text),
+          )
+          .transform((v) => v.join("")),
+        z.union([z.null(), z.undefined()]).transform((_) => ""),
+        z.any().transform((v) => JSON.stringify(v, null, 2)),
+      ]),
+      tool_calls: z
+        .union([z.array(LLMToolCallSchema), z.array(OpenAIToolCallSchema)])
+        .optional(),
+      tool_call_id: z.string().optional(),
+      additional_kwargs: z
+        .object({
+          tool_calls: z
+            .union([z.array(LLMToolCallSchema), z.array(OpenAIToolCallSchema)])
+            .optional(),
+        })
+        .optional(),
+      _originalRole: z.string().optional(), // original LangGraph role
+    }),
+    PlaceholderMessageSchema,
+  ]),
 );
 
 // Langchain integration has the tool definition in a tool message
@@ -173,6 +231,9 @@ const ParsedChatMessageListSchema = z.array(
 const isLangchainToolDefinitionMessage = (
   message: z.infer<typeof ParsedChatMessageListSchema>[0],
 ): message is { content: string; role: ChatMessageRole } => {
+  if (!("content" in message) || typeof message.content !== "string") {
+    return false;
+  }
   try {
     return OpenAIToolSchema.safeParse(JSON.parse(message.content)).success;
   } catch {
@@ -182,15 +243,24 @@ const isLangchainToolDefinitionMessage = (
 
 const transformToPlaygroundMessage = (
   message: z.infer<typeof ParsedChatMessageListSchema>[0],
-): ChatMessage => {
-  const { role, content } = message;
+): ChatMessage | PlaceholderMessage => {
+  // Return placeholder messages as-is
+  if (isPlaceholder(message)) {
+    return message;
+  }
+
+  // Handle regular chat messages - remove the placeholder type
+  const regularMessage = message as Exclude<typeof message, PlaceholderMessage>;
+  const { role, content } = regularMessage;
 
   if (
-    message.role === "assistant" &&
-    (message.tool_calls || message.additional_kwargs?.tool_calls)
+    regularMessage.role === "assistant" &&
+    (regularMessage.tool_calls || regularMessage.additional_kwargs?.tool_calls)
   ) {
     const toolCalls =
-      message.tool_calls ?? message.additional_kwargs?.tool_calls ?? [];
+      regularMessage.tool_calls ??
+      regularMessage.additional_kwargs?.tool_calls ??
+      [];
 
     const playgroundMessage: ChatMessage = {
       role: ChatMessageRole.Assistant,
@@ -210,12 +280,12 @@ const transformToPlaygroundMessage = (
     };
 
     return playgroundMessage;
-  } else if (message.role === "tool") {
+  } else if (regularMessage.role === "tool") {
     const playgroundMessage: ChatMessage = {
       role: ChatMessageRole.Tool,
       content,
       type: ChatMessageType.ToolResult,
-      toolCallId: message.tool_call_id ?? "",
+      toolCallId: regularMessage.tool_call_id ?? "",
     };
 
     return playgroundMessage;
@@ -232,9 +302,26 @@ const parsePrompt = (
   prompt: Prompt & { resolvedPrompt?: Prisma.JsonValue },
 ): PlaygroundCache => {
   if (prompt.type === PromptType.Chat) {
-    const parsedMessages = ParsedChatMessageListSchema.safeParse(
-      prompt.resolvedPrompt,
-    );
+    // For prompts, we can't detect LangGraph from metadata, so we check for invalid roles
+    // If any msg has an invalid role, we assume it might be LangGraph format
+    const isLangGraph =
+      Array.isArray(prompt.resolvedPrompt) &&
+      (prompt.resolvedPrompt as any[]).some(
+        (msg) =>
+          msg &&
+          typeof msg === "object" &&
+          "role" in msg &&
+          !Object.values(ChatMessageRole).includes(msg.role as ChatMessageRole),
+      );
+
+    const normalizedMessages = Array.isArray(prompt.resolvedPrompt)
+      ? (prompt.resolvedPrompt as any[]).map((msg) =>
+          normalizeLangGraphMessage(msg, isLangGraph),
+        )
+      : prompt.resolvedPrompt;
+
+    const parsedMessages =
+      ParsedChatMessageListSchema.safeParse(normalizedMessages);
 
     return parsedMessages.success
       ? { messages: parsedMessages.data.map(transformToPlaygroundMessage) }
@@ -264,8 +351,9 @@ const parseGeneration = (
 ): PlaygroundCache => {
   if (generation.type !== "GENERATION") return null;
 
+  const isLangGraph = isLangGraphTrace(generation);
   const modelParams = parseModelParams(generation, modelToProviderMap);
-  const tools = parseTools(generation);
+  const tools = parseTools(generation, isLangGraph);
   const structuredOutputSchema = parseStructuredOutputSchema(generation);
 
   let input = generation.input?.valueOf();
@@ -305,9 +393,15 @@ const parseGeneration = (
   }
 
   if (typeof input === "object") {
-    const parsedMessages = ParsedChatMessageListSchema.safeParse(
-      "messages" in input ? input["messages"] : input,
-    );
+    const messageData = "messages" in input ? input["messages"] : input;
+    const normalizedMessages = Array.isArray(messageData)
+      ? (messageData as any[]).map((msg) =>
+          normalizeLangGraphMessage(msg, isLangGraph),
+        )
+      : messageData;
+
+    const parsedMessages =
+      ParsedChatMessageListSchema.safeParse(normalizedMessages);
 
     if (parsedMessages.success)
       return {
@@ -321,9 +415,14 @@ const parseGeneration = (
   }
 
   if (typeof input === "object" && "messages" in input) {
-    const parsedMessages = ParsedChatMessageListSchema.safeParse(
-      input["messages"],
-    );
+    const normalizedMessages = Array.isArray(input["messages"])
+      ? (input["messages"] as any[]).map((msg) =>
+          normalizeLangGraphMessage(msg, isLangGraph),
+        )
+      : input["messages"];
+
+    const parsedMessages =
+      ParsedChatMessageListSchema.safeParse(normalizedMessages);
 
     if (parsedMessages.success)
       return {
@@ -387,6 +486,7 @@ function parseTools(
     output: string | null;
     metadata: string | null;
   },
+  isLangGraph: boolean = false,
 ): PlaygroundTool[] {
   // OpenAI Schema
   try {
@@ -407,9 +507,15 @@ function parseTools(
     const input = JSON.parse(generation.input as string);
 
     if (typeof input === "object" && input !== null) {
-      const parsedMessages = ParsedChatMessageListSchema.safeParse(
-        "messages" in input ? input["messages"] : input,
-      );
+      const messageData = "messages" in input ? input["messages"] : input;
+      const normalizedMessages = Array.isArray(messageData)
+        ? (messageData as any[]).map((msg) =>
+            normalizeLangGraphMessage(msg, isLangGraph),
+          )
+        : messageData;
+
+      const parsedMessages =
+        ParsedChatMessageListSchema.safeParse(normalizedMessages);
 
       if (parsedMessages.success)
         return parsedMessages.data

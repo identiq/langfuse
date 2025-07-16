@@ -1,4 +1,4 @@
-import * as z from "zod";
+import { z } from "zod/v4";
 
 // to be used for Prisma JSON type
 // @see: https://github.com/colinhacks/zod#json-type
@@ -24,7 +24,7 @@ type Json = Root | { [key: string]: JsonNested } | JsonNested[];
 export const jsonSchemaNullable: z.ZodType<JsonNested> = z.lazy(() =>
   z.union([
     z.array(jsonSchemaNullable),
-    z.record(jsonSchemaNullable),
+    z.record(z.string(), jsonSchemaNullable),
     nestedLiteralSchema,
   ]),
 );
@@ -33,7 +33,7 @@ export const jsonSchemaNullable: z.ZodType<JsonNested> = z.lazy(() =>
 export const jsonSchema: z.ZodType<Json> = z.lazy(() =>
   z.union([
     z.array(jsonSchemaNullable),
-    z.record(jsonSchemaNullable),
+    z.record(z.string(), jsonSchemaNullable),
     rootLiteralSchema,
   ]),
 );
@@ -80,13 +80,23 @@ export const paginationMetaResponseZod = z.object({
   totalPages: z.number().int().nonnegative(),
 });
 
-export const htmlRegex = /<[^>]*>/;
-export const noHtmlCheck = (value: string) => !htmlRegex.test(value);
-
 const urlRegex = /https?:\/\/[^\s/$.?#].[^\s]*/i;
 export const noUrlCheck = (value: string) => !urlRegex.test(value);
 
 export const NonEmptyString = z.string().min(1);
+
+export const htmlRegex = /<[^>]*>/;
+
+export const StringNoHTML = z.string().refine((val) => !htmlRegex.test(val), {
+  message: "Text cannot contain HTML tags",
+});
+
+export const StringNoHTMLNonEmpty = z
+  .string()
+  .min(1, "Text cannot be empty")
+  .refine((val) => !htmlRegex.test(val), {
+    message: "Text cannot contain HTML tags",
+  });
 
 /**
  * Validates an object against a Zod schema and helps with IDE type warnings.

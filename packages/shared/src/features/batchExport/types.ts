@@ -1,22 +1,23 @@
-import z from "zod";
+import z from "zod/v4";
 
 import { BatchExport } from "@prisma/client";
 
 import { singleFilter } from "../../interfaces/filters";
 import { orderBy } from "../../interfaces/orderBy";
 import { BatchTableNames } from "../../interfaces/tableNames";
+import { TracingSearchType } from "../../interfaces/search";
 
 export enum BatchExportStatus {
-  QUEUED = "QUEUED",
-  PROCESSING = "PROCESSING",
-  COMPLETED = "COMPLETED",
-  FAILED = "FAILED",
+  QUEUED = "QUEUED", // eslint-disable-line no-unused-vars
+  PROCESSING = "PROCESSING", // eslint-disable-line no-unused-vars
+  COMPLETED = "COMPLETED", // eslint-disable-line no-unused-vars
+  FAILED = "FAILED", // eslint-disable-line no-unused-vars
 }
 
 export enum BatchExportFileFormat {
-  JSON = "JSON",
-  CSV = "CSV",
-  JSONL = "JSONL",
+  JSON = "JSON", // eslint-disable-line no-unused-vars
+  CSV = "CSV", // eslint-disable-line no-unused-vars
+  JSONL = "JSONL", // eslint-disable-line no-unused-vars
 }
 
 // Use shared BatchTableNames enum for consistency across batch operations
@@ -41,8 +42,10 @@ export const exportOptions: Record<
 } as const;
 
 export const BatchExportQuerySchema = z.object({
-  tableName: z.nativeEnum(BatchTableNames),
+  tableName: z.enum(BatchTableNames),
   filter: z.array(singleFilter).nullable(),
+  searchQuery: z.string().optional(),
+  searchType: z.array(TracingSearchType).optional(),
   orderBy,
   limit: z.number().optional(),
   page: z.number().optional(),
@@ -54,7 +57,7 @@ export const CreateBatchExportSchema = z.object({
   projectId: z.string(),
   name: z.string(),
   query: BatchExportQuerySchema,
-  format: z.nativeEnum(BatchExportFileFormat),
+  format: z.enum(BatchExportFileFormat),
 });
 
 export const BatchExportSchema = z.object({
@@ -66,9 +69,9 @@ export const BatchExportSchema = z.object({
   finishedAt: z.date().nullable(),
   expiresAt: z.date().nullable(),
   name: z.string(),
-  status: z.nativeEnum(BatchExportStatus),
+  status: z.enum(BatchExportStatus),
   query: BatchExportQuerySchema,
-  format: z.nativeEnum(BatchExportFileFormat),
+  format: z.enum(BatchExportFileFormat),
   url: z.string().nullable(),
   log: z.string().nullable(),
 });

@@ -37,7 +37,7 @@ import {
   getSsoAuthProviderIdForDomain,
   loadSsoProviders,
 } from "@/src/ee/features/multi-tenant-sso/utils";
-import { z } from "zod";
+import { z } from "zod/v4";
 import { CloudConfigSchema } from "@langfuse/shared";
 import {
   CustomSSOProvider,
@@ -480,7 +480,13 @@ export async function getAuthOptions(): Promise<NextAuthOptions> {
                 include: {
                   organization: {
                     include: {
-                      projects: true,
+                      projects: {
+                        where: {
+                          deletedAt: {
+                            equals: null,
+                          },
+                        },
+                      },
                     },
                   },
                   ProjectMemberships: {

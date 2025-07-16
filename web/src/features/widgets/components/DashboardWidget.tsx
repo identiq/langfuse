@@ -5,7 +5,7 @@ import {
   type metricAggregations,
   mapLegacyUiTableFilterToView,
 } from "@/src/features/query";
-import { type z } from "zod";
+import { type z } from "zod/v4";
 import { Chart } from "@/src/features/widgets/chart-library/Chart";
 import { type FilterState } from "@langfuse/shared";
 import { isTimeSeriesChart } from "@/src/features/widgets/chart-library/utils";
@@ -14,11 +14,13 @@ import {
   TrashIcon,
   CopyIcon,
   GripVerticalIcon,
+  Loader2,
 } from "lucide-react";
 import { useRouter } from "next/router";
-import { startCase } from "lodash";
 import { useHasProjectAccess } from "@/src/features/rbac/utils/checkProjectAccess";
 import { showErrorToast } from "@/src/features/notifications/showErrorToast";
+import { DownloadButton } from "@/src/features/widgets/chart-library/DownloadButton";
+import { formatMetricName } from "@/src/features/widgets/utils";
 
 export interface WidgetPlacement {
   id: string;
@@ -111,10 +113,23 @@ export function DashboardWidget({
       return [];
     }
     return queryResult.data.map((item: any) => {
-      // Get the dimension field (first dimension in the query)
-      const dimensionField =
-        widget.data.dimensions.slice().shift()?.field ?? "none";
-      // Get the metric field (first metric in the query with its aggregation)
+      if (widget.data.chartType === "PIVOT_TABLE") {
+        // For pivot tables, preserve all raw data fields without any transformation
+        // The PivotTable component will extract the appropriate metric fields
+        // using the metric field names passed via chartConfig
+        return {
+          dimension:
+            widget.data.dimensions.length > 0
+              ? (widget.data.dimensions[0]?.field ?? "dimension")
+              : "dimension", // Fallback for compatibility
+          metric: 0, // Placeholder - not used for pivot tables
+          time_dimension: item["time_dimension"],
+          // Include all original query fields for pivot table processing
+          ...item,
+        };
+      }
+
+      // Regular chart processing for non-pivot tables
       const metric = widget.data.metrics.slice().shift() ?? {
         measure: "count",
         agg: "count",
@@ -122,6 +137,8 @@ export function DashboardWidget({
       const metricField = `${metric.agg}_${metric.measure}`;
       const metricValue = item[metricField];
 
+      const dimensionField =
+        widget.data.dimensions.slice().shift()?.field ?? "none";
       return {
         dimension:
           item[dimensionField] !== undefined
@@ -134,7 +151,7 @@ export function DashboardWidget({
                 // Objects / numbers / booleans are stringified to avoid React key issues
                 return String(val);
               })()
-            : startCase(metricField === "count_count" ? "Count" : metricField),
+            : formatMetricName(metricField),
         metric: Array.isArray(metricValue)
           ? metricValue
           : Number(metricValue || 0),
@@ -207,38 +224,56 @@ export function DashboardWidget({
             ? " ( 🪢 )"
             : null}
         </span>
-        {hasCUDAccess && (
-          <div className="flex space-x-2">
-            <GripVerticalIcon
-              size={16}
-              className="drag-handle hidden cursor-grab text-muted-foreground hover:text-foreground active:cursor-grabbing lg:group-hover:block"
-            />
-            {widget.data.owner === "PROJECT" ? (
+        <div className="flex space-x-2">
+          {hasCUDAccess && (
+            <>
+              <GripVerticalIcon
+                size={16}
+                className="drag-handle hidden cursor-grab text-muted-foreground hover:text-foreground active:cursor-grabbing lg:group-hover:block"
+              />
+              {widget.data.owner === "PROJECT" ? (
+                <button
+                  onClick={handleEdit}
+                  className="hidden text-muted-foreground hover:text-foreground group-hover:block"
+                  aria-label="Edit widget"
+                >
+                  <PencilIcon size={16} />
+                </button>
+              ) : widget.data.owner === "LANGFUSE" ? (
+                <button
+                  onClick={handleCopy}
+                  className="hidden text-muted-foreground hover:text-foreground group-hover:block"
+                  aria-label="Copy widget"
+                >
+                  <CopyIcon size={16} />
+                </button>
+              ) : null}
               <button
-                onClick={handleEdit}
-                className="hidden text-muted-foreground hover:text-foreground group-hover:block"
-                aria-label="Edit widget"
+                onClick={handleDelete}
+                className="hidden text-muted-foreground hover:text-destructive group-hover:block"
+                aria-label="Delete widget"
               >
-                <PencilIcon size={16} />
+                <TrashIcon size={16} />
               </button>
-            ) : widget.data.owner === "LANGFUSE" ? (
-              <button
-                onClick={handleCopy}
-                className="hidden text-muted-foreground hover:text-foreground group-hover:block"
-                aria-label="Copy widget"
-              >
-                <CopyIcon size={16} />
-              </button>
-            ) : null}
-            <button
-              onClick={handleDelete}
-              className="hidden text-muted-foreground hover:text-destructive group-hover:block"
-              aria-label="Delete widget"
+            </>
+          )}
+          {/* Download button or loading indicator - always available */}
+          {queryResult.isLoading ? (
+            <div
+              className="text-muted-foreground"
+              aria-label="Loading chart data"
+              title="Loading..."
             >
-              <TrashIcon size={16} />
-            </button>
-          </div>
-        )}
+              <Loader2 size={16} className="animate-spin" />
+            </div>
+          ) : (
+            <DownloadButton
+              data={transformedData}
+              fileName={widget.data.name}
+              className="hidden group-hover:block"
+            />
+          )}
+        </div>
       </div>
       <div
         className="mb-4 truncate text-sm text-muted-foreground"
@@ -256,6 +291,16 @@ export function DashboardWidget({
               ? 100
               : (widget.data.chartConfig.row_limit ?? 100)
           }
+          chartConfig={{
+            ...widget.data.chartConfig,
+            // For PIVOT_TABLE, enhance chartConfig with dimensions and metric field names
+            ...(widget.data.chartType === "PIVOT_TABLE" && {
+              dimensions: widget.data.dimensions.map((dim) => dim.field),
+              metrics: widget.data.metrics.map(
+                (metric) => `${metric.agg}_${metric.measure}`,
+              ),
+            }),
+          }}
         />
       </div>
     </div>

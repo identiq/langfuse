@@ -1,4 +1,3 @@
-import { type NavigationItem } from "@/src/components/layouts/layout";
 import {
   CommandDialog,
   CommandEmpty,
@@ -19,6 +18,7 @@ import { useProjectSettingsPages } from "@/src/pages/project/[projectId]/setting
 import { useOrganizationSettingsPages } from "@/src/pages/organization/[organizationId]/settings";
 import { useQueryProjectOrOrganization } from "@/src/features/projects/hooks";
 import { api } from "@/src/utils/api";
+import { type NavigationItem } from "@/src/components/layouts/utilities/routes";
 
 export function CommandMenu({
   mainNavigation,
@@ -90,6 +90,7 @@ export function CommandMenu({
         order: "DESC",
       },
       limit: 100,
+      page: 0,
     },
     {
       enabled: open && Boolean(project?.id),

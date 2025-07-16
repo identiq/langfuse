@@ -26,7 +26,7 @@
     <a href="https://langfuse.com/roadmap"><strong>路线图</strong></a> ·
   </div>
   <br/>
-  <span>Langfuse 使用 <a href="https://github.com/orgs/langfuse/discussions"><strong>Github Discussions</strong></a> 作为支持和功能请求的平台。</span>
+  <span>Langfuse 使用 <a href="https://github.com/orgs/langfuse/discussions"><strong>GitHub Discussions</strong></a> 作为支持和功能请求的平台。</span>
   <br/>
   <span><b>我们正在招聘。</b> <a href="https://langfuse.com/careers"><strong>加入我们</strong></a>，从事产品工程和技术市场职位。</span>
   <br/>
@@ -94,7 +94,7 @@ Langfuse 是一个 **开源 LLM 工程** 平台。它帮助团队协作 **开发
   
 - [提示管理](https://langfuse.com/docs/prompts/get-started) 帮助你集中管理、版本控制并协作迭代提示。得益于服务器和客户端的高效缓存，你可以在不增加延迟的情况下反复迭代提示。
 
-- [评估](https://langfuse.com/docs/scores/overview) 是 LLM 应用开发流程的关键组成部分，Langfuse 能够满足你的多样需求。它支持 LLM 作为“裁判”、用户反馈收集、手动标注以及通过 API/SDK 实现自定义评估流程。
+- [评估](https://langfuse.com/docs/scores/overview) 是 LLM 应用开发流程的关键组成部分，Langfuse 能够满足你的多样需求。它支持 LLM 作为"裁判"、用户反馈收集、手动标注以及通过 API/SDK 实现自定义评估流程。
 
 - [数据集](https://langfuse.com/docs/datasets/overview) 为评估你的 LLM 应用提供测试集和基准。它们支持持续改进、部署前测试、结构化实验、灵活评估，并能与 LangChain、LlamaIndex 等框架无缝整合。
 
@@ -135,7 +135,7 @@ Langfuse 是一个 **开源 LLM 工程** 平台。它帮助团队协作 **开发
 
 - [虚拟机](https://langfuse.com/self-hosting/docker-compose)：使用 Docker Compose 在单台虚拟机上部署 Langfuse。
 
-- 【计划中】：针对各云平台的部署指南，欢迎在以下讨论中投票和评论：[AWS](https://github.com/orgs/langfuse/discussions/4645)、[Google Cloud](https://github.com/langfuse/discussions/4646)、[Azure](https://github.com/orgs/langfuse/discussions/4647)。
+- Terraform 模板: [AWS](https://langfuse.com/self-hosting/aws)、[Azure](https://langfuse.com/self-hosting/azure)、[GCP](https://langfuse.com/self-hosting/gcp)
 
 请参阅 [自托管文档](https://langfuse.com/self-hosting) 了解更多关于架构和配置选项的信息。
 
@@ -155,6 +155,7 @@ Langfuse 是一个 **开源 LLM 工程** 平台。它帮助团队协作 **开发
 | [LiteLLM](https://langfuse.com/docs/integrations/litellm)               | Python, JS/TS (仅代理)     | 允许使用任何 LLM 替代 GPT。支持 Azure、OpenAI、Cohere、Anthropic、Ollama、VLLM、Sagemaker、HuggingFace、Replicate（100+ LLMs）。         |
 | [Vercel AI SDK](https://langfuse.com/docs/integrations/vercel-ai-sdk)     | JS/TS                    | 基于 TypeScript 的工具包，帮助开发者使用 React、Next.js、Vue、Svelte 和 Node.js 构建 AI 驱动的应用。                                           |
 | [API](https://langfuse.com/docs/api)                                    |                          | 直接调用公共 API。提供 OpenAPI 规格。                                                                                                       |
+| [Google VertexAI 和 Gemini](https://langfuse.com/docs/integrations/google-vertex-ai) | 模型                | 在 Google 上运行基础模型和微调模型。                                                                         |
 
 ### 与 Langfuse 集成的软件包：
 
@@ -162,9 +163,9 @@ Langfuse 是一个 **开源 LLM 工程** 平台。它帮助团队协作 **开发
 | ---------------------------------------------------------------------- | ------------------- | -------------------------------------------------------------------------------------------------------- |
 | [Instructor](https://langfuse.com/docs/integrations/instructor)         | 库                  | 用于获取结构化 LLM 输出（JSON、Pydantic）的库。                                                         |
 | [DSPy](https://langfuse.com/docs/integrations/dspy)                     | 库                  | 一个系统性优化语言模型提示和权重的框架。                                                                 |
+| [Amazon Bedrock](https://langfuse.com/docs/integrations/amazon-bedrock) | 模型                | 在 AWS 上运行基础模型和微调模型。                                                                         |
 | [Mirascope](https://langfuse.com/docs/integrations/mirascope)           | 库                  | 构建 LLM 应用的 Python 工具包。                                                                           |
 | [Ollama](https://langfuse.com/docs/integrations/ollama)                 | 模型（本地）         | 在你的机器上轻松运行开源 LLM。                                                                            |
-| [Amazon Bedrock](https://langfuse.com/docs/integrations/amazon-bedrock) | 模型                | 在 AWS 上运行基础模型和微调模型。                                                                         |
 | [AutoGen](https://langfuse.com/docs/integrations/autogen)               | 代理框架             | 用于构建分布式代理的开源 LLM 平台。                                                                       |
 | [Flowise](https://langfuse.com/docs/integrations/flowise)               | 聊天/代理界面         | 基于 JS/TS 的无代码构建器，用于定制化 LLM 流程。                                                          |
 | [Langflow](https://langfuse.com/docs/integrations/langflow)             | 聊天/代理界面         | 基于 Python 的 LangChain 用户界面，采用 react-flow 设计，提供便捷的实验与原型构建体验。                   |
@@ -213,8 +214,8 @@ LANGFUSE_HOST="https://cloud.langfuse.com" # 🇪🇺 欧盟区域
 
 创建示例代码（文件名：**main.py**）：
 
-````python:main.py
-from langfuse.decorators import observe
+```python:main.py
+from langfuse import observe
 from langfuse.openai import openai  # OpenAI 集成
 
 @observe()
@@ -253,7 +254,7 @@ _[Langfuse 中的公共示例追踪](https://cloud.langfuse.com/project/cloramnk
 
 - 我们的 [文档](https://langfuse.com/docs) 是查找答案的最佳起点。内容全面，我们投入大量时间进行维护。你也可以通过 GitHub 提出文档修改建议。
 - [Langfuse 常见问题](https://langfuse.com/faq) 解答了最常见的问题。
-- 使用 “[Ask AI](https://langfuse.com/docs/ask-ai)” 立即获取问题答案。
+- 使用 "Ask AI" 立即获取问题答案。
 
 支持渠道：
 
@@ -351,4 +352,4 @@ _[Langfuse 中的公共示例追踪](https://cloud.langfuse.com/project/cloramnk
 所有数据均不会与第三方共享，也不包含任何敏感信息。我们对这一过程保持高度透明，你可以在 [此处](/web/src/features/telemetry/index.ts) 查看我们收集的具体数据。
 
 你可以通过设置 `TELEMETRY_ENABLED=false` 来选择退出。
-````
+```

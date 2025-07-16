@@ -6,7 +6,7 @@ import {
   useQueryParam,
   withDefault,
 } from "use-query-params";
-import type { z } from "zod";
+import type { z } from "zod/v4";
 import { OpenAiMessageView } from "@/src/components/trace/IOPreview";
 import {
   TabsBar,
@@ -18,10 +18,17 @@ import { Tabs, TabsList, TabsTrigger } from "@/src/components/ui/tabs";
 import { Badge } from "@/src/components/ui/badge";
 import { CodeView, JSONView } from "@/src/components/ui/CodeJsonViewer";
 import { DetailPageNav } from "@/src/features/navigate-detail-pages/DetailPageNav";
-import { PromptType } from "@/src/features/prompts/server/utils/validation";
 import useProjectIdFromURL from "@/src/hooks/useProjectIdFromURL";
 import { api } from "@/src/utils/api";
-import { extractVariables } from "@langfuse/shared";
+import {
+  extractVariables,
+  PRODUCTION_LABEL,
+  PromptType,
+} from "@langfuse/shared";
+import {
+  getPromptTabs,
+  PROMPT_TABS,
+} from "@/src/features/navigation/utils/prompt-tabs";
 import { PromptHistoryNode } from "./prompt-history";
 import { JumpToPlaygroundButton } from "@/src/features/playground/page/components/JumpToPlaygroundButton";
 import { ChatMlArraySchema } from "@/src/components/schemas/ChatMlSchema";
@@ -51,7 +58,6 @@ import { TagPromptDetailsPopover } from "@/src/features/tag/components/TagPrompt
 import { SetPromptVersionLabels } from "@/src/features/prompts/components/SetPromptVersionLabels";
 import { CommentDrawerButton } from "@/src/features/comments/CommentDrawerButton";
 import { Command, CommandInput } from "@/src/components/ui/command";
-import { PRODUCTION_LABEL } from "@/src/features/prompts/constants";
 import { renderContentWithPromptButtons } from "@/src/features/prompts/components/renderContentWithPromptButtons";
 import { PromptVariableListPreview } from "@/src/features/prompts/components/PromptVariableListPreview";
 
@@ -64,7 +70,7 @@ const getPythonCode = (
 # Initialize Langfuse client
 langfuse = Langfuse()
 
-# Get production prompt 
+# Get production prompt
 prompt = langfuse.get_prompt("${name}")
 
 # Get by label
@@ -84,7 +90,7 @@ const getJsCode = (
 // Initialize the Langfuse client
 const langfuse = new Langfuse();
 
-// Get production prompt 
+// Get production prompt
 const prompt = await langfuse.getPrompt("${name}");
 
 // Get by label
@@ -95,10 +101,18 @@ ${labels.length > 0 ? labels.map((label) => `const prompt = await langfuse.getPr
 langfuse.getPrompt("${name}", ${version})
 `;
 
-export const PromptDetail = () => {
+export const PromptDetail = ({
+  promptName: promptNameProp,
+}: { promptName?: string } = {}) => {
   const projectId = useProjectIdFromURL();
   const capture = usePostHogClientCapture();
-  const promptName = decodeURIComponent(useRouter().query.promptName as string);
+  const router = useRouter();
+
+  const promptName =
+    promptNameProp ||
+    (router.query.promptName
+      ? decodeURIComponent(router.query.promptName as string)
+      : "");
   const [currentPromptVersion, setCurrentPromptVersion] = useQueryParam(
     "version",
     NumberParam,
@@ -271,20 +285,10 @@ export const PromptDetail = () => {
             href: `/project/${projectId}/prompts/`,
           },
         ],
-        tabsComponent: (
-          <TabsBar value="versions">
-            <TabsBarList>
-              <TabsBarTrigger value="versions">Versions</TabsBarTrigger>
-              <TabsBarTrigger value="metrics" asChild>
-                <Link
-                  href={`/project/${projectId}/prompts/${encodeURIComponent(promptName)}/metrics`}
-                >
-                  Metrics
-                </Link>
-              </TabsBarTrigger>
-            </TabsBarList>
-          </TabsBar>
-        ),
+        tabsProps: {
+          tabs: getPromptTabs(projectId as string, promptName as string),
+          activeTab: PROMPT_TABS.VERSIONS,
+        },
         actionButtonsLeft: (
           <TagPromptDetailsPopover
             tags={prompt.tags}

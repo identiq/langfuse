@@ -1,5 +1,5 @@
 import { DashboardWidgetChartType, DashboardWidgetViews } from "@prisma/client";
-import { z } from "zod";
+import { z } from "zod/v4";
 import { singleFilter } from "../../../";
 
 export const BaseTimeSeriesChartConfig = z.object({});
@@ -33,6 +33,10 @@ export const HistogramChartConfig = BaseTotalValueChartConfig.extend({
   bins: z.number().int().min(1).max(100).optional().default(10),
 });
 
+export const PivotTableChartConfig = BaseTotalValueChartConfig.extend({
+  type: z.literal("PIVOT_TABLE"),
+});
+
 // Define dimension schema
 export const DimensionSchema = z.object({
   field: z.string(),
@@ -53,6 +57,7 @@ export const ChartConfigSchema = z.discriminatedUnion("type", [
   PieChartConfig,
   BigNumberChartConfig,
   HistogramChartConfig,
+  PivotTableChartConfig,
 ]);
 
 export const DashboardDefinitionWidgetWidgetSchema = z.object({
@@ -105,11 +110,11 @@ export const WidgetDomainSchema = z.object({
   projectId: z.string().nullable(),
   name: z.string(),
   description: z.string(),
-  view: z.nativeEnum(DashboardWidgetViews),
+  view: z.enum(DashboardWidgetViews),
   dimensions: z.array(DimensionSchema),
   metrics: z.array(MetricSchema),
   filters: z.array(singleFilter),
-  chartType: z.nativeEnum(DashboardWidgetChartType),
+  chartType: z.enum(DashboardWidgetChartType),
   chartConfig: ChartConfigSchema,
   owner: OwnerEnum,
 });
@@ -118,11 +123,11 @@ export const WidgetDomainSchema = z.object({
 export const CreateWidgetInputSchema = z.object({
   name: z.string().min(1, "Widget name is required"),
   description: z.string(),
-  view: z.nativeEnum(DashboardWidgetViews),
+  view: z.enum(DashboardWidgetViews),
   dimensions: z.array(DimensionSchema),
   metrics: z.array(MetricSchema),
   filters: z.array(singleFilter),
-  chartType: z.nativeEnum(DashboardWidgetChartType),
+  chartType: z.enum(DashboardWidgetChartType),
   chartConfig: ChartConfigSchema,
 });
 

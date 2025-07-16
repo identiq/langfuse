@@ -11,15 +11,24 @@ import { type DashboardWidgetChartType } from "@langfuse/shared/src/db";
 import { Button } from "@/src/components/ui/button";
 import { AlertCircle } from "lucide-react";
 import { BigNumber } from "@/src/features/widgets/chart-library/BigNumber";
+import { PivotTable } from "@/src/features/widgets/chart-library/PivotTable";
 
 export const Chart = ({
   chartType,
   data,
   rowLimit,
+  chartConfig,
 }: {
   chartType: DashboardWidgetChartType;
   data: DataPoint[];
   rowLimit: number;
+  chartConfig?: {
+    type: DashboardWidgetChartType;
+    row_limit?: number;
+    bins?: number;
+    dimensions?: string[];
+    metrics?: string[];
+  };
 }) => {
   const [forceRender, setForceRender] = useState(false);
   const shouldWarn = data.length > 2000 && !forceRender;
@@ -56,15 +65,16 @@ export const Chart = ({
       case "HISTOGRAM":
         return <HistogramChart data={renderedData} />;
       case "NUMBER": {
-        // Show the sum of all metrics, or just the first metric if only one
-        const value =
-          renderedData.length === 1
-            ? renderedData[0].metric
-            : renderedData.reduce(
-                (acc, d) => acc + ((d.metric as number) || 0),
-                0,
-              );
-        return <BigNumber metric={value} />;
+        return <BigNumber data={renderedData} />;
+      }
+      case "PIVOT_TABLE": {
+        // Extract pivot table configuration from chartConfig
+        const pivotConfig = {
+          dimensions: chartConfig?.dimensions ?? [],
+          metrics: chartConfig?.metrics ?? ["metric"], // Use metrics from chartConfig
+          rowLimit: chartConfig?.row_limit ?? rowLimit,
+        };
+        return <PivotTable data={renderedData} config={pivotConfig} />;
       }
       default:
         return <HorizontalBarChart data={renderedData.slice(0, rowLimit)} />;
